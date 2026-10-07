@@ -127,6 +127,23 @@ exports.googleLogin = async (req, res) => {
 
     const token = jwt.sign({ id: user.id }, config.JWT_SECRET, { expiresIn: '14d' });
 
+    res.json({
+      success: true,
+      message: 'Đăng nhập bằng Google thành công!',
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar || picture
+      }
+    });
+  } catch (err) {
+    console.error('Lỗi Google Auth:', err);
+    res.status(500).json({ success: false, message: 'Lỗi xác thực Google: ' + err.message });
+  }
+};
+
 // Đăng nhập nhanh 1-Chạm bằng Gmail (Không cần Google Cloud Console)
 exports.quickGoogleLogin = async (req, res) => {
   try {
