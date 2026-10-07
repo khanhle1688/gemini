@@ -21,15 +21,21 @@ class AIStoryboardService {
   /**
    * Tạo 2 phân cảnh điện ảnh 10s thông minh từ master prompt
    */
-  fallbackStoryboard(prompt) {
+  fallbackStoryboard(prompt, model = 'gemini-3.5-flash-lite') {
     const cleanPrompt = prompt.trim();
 
-    const scene1 = `Phân cảnh 1 (0-10s): Góc quay điện ảnh mở đầu, thiết lập bối cảnh hoành tráng cho ${cleanPrompt}. Camera chuyển động tracking mượt mà từ toàn cảnh vào cận cảnh, ánh sáng ấn tượng, chi tiết chân thực sắc nét 4K 60fps.`;
-    
-    const scene2 = `Phân cảnh 2 (10-20s): Tiếp nối liền mạch phân cảnh 1 của ${cleanPrompt}, cao trào diễn tiến hành động mạnh mẽ, hiệu ứng ánh sáng rực rỡ và chuyển động uyển chuyển. Camera từ từ lùi ra xa (pull-back shot) tạo cảm xúc điện ảnh trọn vẹn.`;
+    // Rút trích các từ khóa thị giác chính
+    // Nếu prompt dài hoặc là một câu chuyện, chuyển đổi thành bối cảnh thị giác điện ảnh
+    const visualSubject = cleanPrompt
+      .replace(/["“”]/g, '')
+      .slice(0, 120);
+
+    const scene1Prompt = `cinematic film still, opening scene of ${visualSubject}, atmospheric volumetric lighting, cinematic color grading, photorealistic, 4k ultra-detailed, 8k resolution, Arri Alexa`;
+    const scene2Prompt = `cinematic film still, continuing dramatic climax of ${visualSubject}, dramatic shadows, smooth camera perspective, hyper-realistic details, cinematic photography`;
 
     return {
       masterPrompt: cleanPrompt,
+      model,
       mode: '2x10s',
       totalDuration: 20,
       scenes: [
@@ -37,15 +43,17 @@ class AIStoryboardService {
           sceneIndex: 1,
           timeRange: '0-10s',
           duration: 10,
-          title: 'Mở đầu & Diễn tiến',
-          prompt: scene1,
+          title: 'Phân cảnh 1: Mở đầu & Diễn tiến',
+          prompt: scene1Prompt,
+          displayPrompt: `Cảnh 1 (0-10s): Thiết lập không gian mở đầu cho "${visualSubject.slice(0, 60)}..."`,
         },
         {
           sceneIndex: 2,
           timeRange: '10-20s',
           duration: 10,
-          title: 'Cao trào & Kết thúc',
-          prompt: scene2,
+          title: 'Phân cảnh 2: Cao trào & Kết thúc',
+          prompt: scene2Prompt,
+          displayPrompt: `Cảnh 2 (10-20s): Diễn tiến cao trào tiếp nối cho "${visualSubject.slice(0, 60)}..."`,
         },
       ],
     };

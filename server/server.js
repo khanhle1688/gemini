@@ -47,13 +47,16 @@ app.post('/api/videos/enhance-prompt', auth, videoController.enhancePrompt);
 app.get('/api/system/info', (req, res) => {
   res.json({
     status: 'online',
-    version: '1.0.0',
-    pipeline: '2x10s = 20s Full Automatic',
+    version: '1.1.0',
+    pipeline: '2x10s = 20s Full Automatic (AI Visual Engine)',
     ffmpeg: config.FFMPEG_PATH,
     supportedModels: [
-      { id: 'veo-2', name: 'Google Veo 2 (Mô hình Điện Ảnh Cao Cấp)', description: 'Chất lượng 1080p, màu sắc điện ảnh sâu, chi tiết chân thực.' },
-      { id: 'veo-fast', name: 'Google Veo Fast (Tốc Độ Siêu Nhanh)', description: 'Tối ưu tốc độ render, hoàn hảo cho xem thử và phác thảo.' },
-      { id: 'gemini-web-automation', name: 'Gemini Web Account Automation', description: 'Tận dụng trực tiếp tài khoản đăng nhập trên gemini.google.com.' }
+      { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite', description: 'Tối ưu tốc độ cao, siêu nhẹ, tạo kịch bản và khung hình tức thì.' },
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Thế hệ mới tốc độ cao và sáng tạo điện ảnh xuất sắc.' },
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Cân bằng giữa tốc độ và độ chi tiết hình ảnh.' },
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Suy luận bối cảnh sâu sắc, chi tiết điện ảnh 4K chân thực.' },
+      { id: 'google-veo-2', name: 'Google Veo 2', description: 'Mô hình video chuyên biệt độ phân giải cao 1080p.' },
+      { id: 'gemini-web-automation', name: 'Gemini Web Account Direct', description: 'Tận dụng trực tiếp tài khoản đăng nhập trên gemini.google.com.' }
     ]
   });
 });

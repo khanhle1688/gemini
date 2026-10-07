@@ -1,11 +1,55 @@
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+const http = require('http');
 const { execFile } = require('child_process');
 const config = require('../config');
 
 class VideoGeneratorService {
   constructor() {
     this.ffmpegPath = config.FFMPEG_PATH;
+  }
+
+  /**
+   * Tải file từ URL về ổ cứng qua Node.js stream
+   */
+  downloadFile(url, dest) {
+    return new Promise((resolve, reject) => {
+      const file = fs.createWriteStream(dest);
+      const client = url.startsWith('https') ? https : http;
+
+      const request = client.get(url, { timeout: 25000 }, (response) => {
+        // Xử lý chuyển hướng nếu có (301/302)
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          const redirectUrl = response.headers.location;
+          return this.downloadFile(redirectUrl, dest).then(resolve).catch(reject);
+        }
+
+        if (response.statusCode !== 200) {
+          file.close();
+          try { fs.unlinkSync(dest); } catch (e) {}
+          return reject(new Error(`Tải ảnh thất bại với mã lỗi HTTP: ${response.statusCode}`));
+        }
+
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close(() => resolve(dest));
+        });
+      });
+
+      request.on('error', (err) => {
+        file.close();
+        try { fs.unlinkSync(dest); } catch (e) {}
+        reject(err);
+      });
+
+      request.on('timeout', () => {
+        request.destroy();
+        file.close();
+        try { fs.unlinkSync(dest); } catch (e) {}
+        reject(new Error('Hết thời gian chờ khi tải ảnh AI (Timeout).'));
+      });
+    });
   }
 
   /**
@@ -16,111 +60,90 @@ class VideoGeneratorService {
       fs.mkdirSync(config.TEMP_DIR, { recursive: true });
     }
 
-    // Nếu cấu hình API Veo thực tế
-    if (config.GOOGLE_VEO_API_URL && config.GEMINI_API_KEY) {
-      try {
-        console.log(`[*] Đang gọi Veo API để sinh cảnh ${scene.sceneIndex}...`);
-        return await this.callVeoAPI(scene, aspectRatio, outputPath);
-      } catch (err) {
-        console.warn(`[!] Lỗi gọi Veo API, chuyển sang Bộ sinh Cinematic Render: ${err.message}`);
+    const isPortrait = aspectRatio === '9:16';
+    const width = isPortrait ? 720 : 1280;
+    const height = isPortrait ? 1280 : 720;
+    const duration = scene.duration || 10;
+
+    // 1. Tải hình ảnh AI thực tế được sinh từ chính Prompt của người dùng
+    const tempImage = outputPath.replace('.mp4', '_ai.jpg');
+    let hasAIImage = false;
+
+    try {
+      console.log(`[*] Đang sinh hình ảnh AI thực tế cho Cảnh ${scene.sceneIndex}...`);
+      const cleanPrompt = encodeURIComponent(scene.prompt);
+      const seed = Math.floor(Math.random() * 1000000);
+      const imageUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}`;
+
+      await this.downloadFile(imageUrl, tempImage);
+      if (fs.existsSync(tempImage) && fs.statSync(tempImage).size > 5000) {
+        hasAIImage = true;
+        console.log(`[+] Tải ảnh AI thành công (${Math.round(fs.statSync(tempImage).size / 1024)} KB) cho Cảnh ${scene.sceneIndex}`);
       }
+    } catch (err) {
+      console.warn(`[!] Không thể tải ảnh AI qua mạng: ${err.message}, chuyển sang render dự phòng.`);
     }
 
-    // Bộ sinh Video Điện Ảnh Nội Bộ (Cinematic Canvas Video Engine)
-    // Tự động render video 1080p sắc nét 10 giây có chuyển động camera, hiệu ứng ánh sáng động & tiêu đề
-    return this.renderCinematicScene(scene, aspectRatio, outputPath);
-  }
-
-  /**
-   * Render video 10s chuyển động điện ảnh HD
-   */
-  async renderCinematicScene(scene, aspectRatio, outputPath) {
+    // 2. Chuyển đổi thành video chuyển động điện ảnh 10s bằng FFmpeg
     return new Promise((resolve, reject) => {
-      const isPortrait = aspectRatio === '9:16';
-      const width = isPortrait ? 720 : 1280;
-      const height = isPortrait ? 1280 : 720;
-      const duration = scene.duration || 10;
-      
-      // Màu sắc theo phân cảnh (Cảnh 1: Xanh điện ảnh huyền bí, Cảnh 2: Vàng cam hoàng hôn rực rỡ)
-      const color1 = scene.sceneIndex === 1 ? '0x0f2027' : '0x200122';
-      const color2 = scene.sceneIndex === 1 ? '0x203a43' : '0x6f0000';
-      const color3 = scene.sceneIndex === 1 ? '0x2c5364' : '0xba274a';
+      let args = [];
 
-      // Tạo chuyển động gradient và hiệu ứng camera zoom chậm
-      const filter = `
-        testsrc=size=${width}x${height}:rate=30:duration=${duration},
-        format=yuv420p,
-        geq=r='(sin(2*PI*T/10 + X/200)+1)*60':g='(cos(2*PI*T/10 + Y/200)+1)*80':b='(sin(2*PI*T/10 + (X+Y)/300)+1)*120',
-        drawbox=y=0:color=black@0.4:width=iw:height=80:t=fill,
-        drawtext=text='CANH ${scene.sceneIndex} (10s) - GEMINI VEO 20S':fontcolor=white:fontsize=22:x=30:y=28
-      `.replace(/\s+/g, ' ').trim();
+      if (hasAIImage) {
+        // Hiệu ứng Ken Burns camera chuyển động mượt mà (Cảnh 1 zoom vào, Cảnh 2 pan/zoom ra)
+        const zoomExpr = scene.sceneIndex === 1
+          ? "min(zoom+0.0012,1.35)"
+          : "max(1.35-0.0012*on,1.0)";
+        
+        const xExpr = scene.sceneIndex === 1
+          ? "iw/2-(iw/zoom/2)"
+          : "(iw-iw/zoom)*(on/300)";
 
-      const args = [
-        '-y',
-        '-f', 'lavfi',
-        '-i', `color=c=black:s=${width}x${height}:d=${duration}:r=30`,
-        '-f', 'lavfi',
-        '-i', `anullsrc=r=44100:cl=stereo`,
-        '-filter_complex',
-        `[0:v]geq=r='15+sin(T*0.5+X/100)*40':g='25+cos(T*0.5+Y/100)*50':b='45+sin(T*0.5)*70'[vbg];` +
-        `[vbg]drawbox=y=0:color=black@0.5:width=iw:height=70:t=fill,` +
-        `drawtext=text='${scene.title.toUpperCase()} (10S)':fontcolor=0x8ab4f8:fontsize=20:x=30:y=25[vout]`,
-        '-map', '[vout]',
-        '-map', '1:a',
-        '-t', `${duration}`,
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        '-preset', 'ultrafast',
-        outputPath
-      ];
+        const filterComplex = `[0:v]scale=8000:-1,zoompan=z='${zoomExpr}':d=300:x='${xExpr}':y='ih/2-(ih/zoom/2)':s=${width}x${height}:fps=30,format=yuv420p[vout]`;
+
+        args = [
+          '-y',
+          '-loop', '1',
+          '-i', tempImage,
+          '-f', 'lavfi',
+          '-i', 'anullsrc=r=44100:cl=stereo',
+          '-filter_complex', filterComplex,
+          '-map', '[vout]',
+          '-map', '1:a',
+          '-t', `${duration}`,
+          '-c:v', 'libx264',
+          '-pix_fmt', 'yuv420p',
+          '-preset', 'ultrafast',
+          outputPath
+        ];
+      } else {
+        // Fallback khẩn cấp nếu mất kết nối mạng
+        args = [
+          '-y',
+          '-f', 'lavfi',
+          '-i', `color=c=${scene.sceneIndex === 1 ? '0x0f2027' : '0x200122'}:s=${width}x${height}:d=${duration}:r=30`,
+          '-f', 'lavfi',
+          '-i', 'anullsrc=r=44100:cl=stereo',
+          '-t', `${duration}`,
+          '-c:v', 'libx264',
+          '-pix_fmt', 'yuv420p',
+          '-preset', 'ultrafast',
+          outputPath
+        ];
+      }
 
       execFile(this.ffmpegPath, args, (err) => {
+        // Dọn dẹp ảnh tạm
+        if (fs.existsSync(tempImage)) {
+          try { fs.unlinkSync(tempImage); } catch (e) {}
+        }
+
         if (err) {
-          // Thử lệnh đơn giản hơn nếu máy chưa cài font libfreetype
-          const simpleArgs = [
-            '-y',
-            '-f', 'lavfi',
-            '-i', `color=c=${scene.sceneIndex === 1 ? 'navy' : 'purple'}:s=${width}x${height}:d=${duration}:r=30`,
-            '-f', 'lavfi',
-            '-i', `anullsrc=r=44100:cl=stereo`,
-            '-t', `${duration}`,
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            '-preset', 'ultrafast',
-            outputPath
-          ];
-          execFile(this.ffmpegPath, simpleArgs, (err2) => {
-            if (err2) return reject(err2);
-            resolve(outputPath);
-          });
-          return;
+          console.error(`[X] Lỗi FFmpeg render video cảnh ${scene.sceneIndex}:`, err.message);
+          return reject(err);
         }
         resolve(outputPath);
       });
     });
-  }
-
-  /**
-   * Gọi API Veo chính thức của Google (Dành cho Production khi có key)
-   */
-  async callVeoAPI(scene, aspectRatio, outputPath) {
-    // Tích hợp sẵn endpoint Veo qua Google GenAI SDK hoặc HTTP request
-    // Khi người dùng nhập API key, hàm này sẽ tự kích hoạt
-    const res = await fetch(config.GOOGLE_VEO_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.GEMINI_API_KEY}`
-      },
-      body: JSON.stringify({
-        prompt: scene.prompt,
-        durationSeconds: 10,
-        aspectRatio: aspectRatio,
-      })
-    });
-    const buffer = await res.arrayBuffer();
-    fs.writeFileSync(outputPath, Buffer.from(buffer));
-    return outputPath;
   }
 }
 
