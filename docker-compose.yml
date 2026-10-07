@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  gemini-video-studio:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: gemini_video_20s_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - JWT_SECRET=gemini-video-20s-production-secret-key-change-this
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      # Lưu trữ video vĩnh viễn trên ổ cứng server
+      - ./server/storage/videos:/app/server/storage/videos
+      # Lưu trữ cơ sở dữ liệu người dùng và lịch sử video
+      - ./server/data:/app/server/data

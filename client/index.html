@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Video 20s Studio - Tạo Video 20s Tự Động Từ 1 Prompt</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <header class="navbar">
+    <div class="nav-container">
+      <div class="logo">
+        <span class="logo-icon">🎬</span>
+        <div class="logo-text">
+          <span class="brand-title">GEMINI VEO <span class="badge-20s">20s</span></span>
+          <span class="brand-sub">Auto Video Generator</span>
+        </div>
+      </div>
+
+      <div class="nav-actions">
+        <div class="server-status">
+          <span class="status-dot"></span>
+          <span class="status-text">Server Sẵn Sàng (2x10s)</span>
+        </div>
+
+        <div id="auth-section">
+          <!-- Sẽ render động qua app.js -->
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="main-container">
+    
+    <!-- Hero / Headline -->
+    <section class="hero-section">
+      <h1 class="hero-title">
+        Nhập 1 Prompt duy nhất, <br>
+        <span class="text-gradient">Tự động xuất Video 20s chuẩn điện ảnh</span>
+      </h1>
+      <p class="hero-desc">
+        Hệ thống tự động phân tích kịch bản thành <b>2 phân cảnh 10s</b>, điều phối sinh clip qua Google Veo, 
+        tự ghép nối siêu tốc bằng FFmpeg và lưu trữ trực tiếp trên Server của bạn.
+      </p>
+    </section>
+
+    <!-- Studio Box (Card tạo video) -->
+    <section class="studio-card">
+      <div class="studio-header">
+        <span class="studio-tag">✨ 1-CLICK PROMPT STUDIO</span>
+        <div class="pipeline-badge">⚡ Pipeline: 2 Cảnh x 10s = 20s</div>
+      </div>
+
+      <div class="prompt-box">
+        <textarea id="prompt-input" rows="3" placeholder="Nhập ý tưởng video của bạn... (Ví dụ: Một phi thuyền vũ trụ bay qua các vành đai sao Thổ rồi đáp xuống bề mặt hành tinh phát sáng kỳ ảo)"></textarea>
+        
+        <div class="prompt-tools">
+          <button id="btn-enhance" class="btn-tool" title="AI tự động bổ sung từ khóa điện ảnh 4K HDR">
+            <span>✨ Nâng cấp Prompt (AI Enhancer)</span>
+          </button>
+          <span id="char-count" class="char-count">0 ký tự</span>
+        </div>
+      </div>
+
+      <!-- Controls Row: Model & Aspect Ratio -->
+      <div class="studio-controls">
+        <div class="control-group">
+          <label for="model-select">🤖 Chọn Model Video:</label>
+          <div class="select-wrapper">
+            <select id="model-select">
+              <option value="veo-2">Google Veo 2 (Điện ảnh cao cấp, 1080p)</option>
+              <option value="veo-fast">Google Veo Fast (Tốc độ cao)</option>
+              <option value="gemini-web-automation">Gemini Web Account Automation</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label>📐 Tỉ Lệ Khung Hình:</label>
+          <div class="ratio-toggle">
+            <button type="button" class="btn-ratio active" data-ratio="16:9">
+              <span class="ratio-icon">📺</span> 16:9 (Ngang)
+            </button>
+            <button type="button" class="btn-ratio" data-ratio="9:16">
+              <span class="ratio-icon">📱</span> 9:16 (TikTok / Reels)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Generate Button -->
+      <button id="btn-generate" class="btn-generate">
+        <span class="btn-icon">🚀</span>
+        <span class="btn-text">BẮT ĐẦU TẠO VIDEO 20S HOÀN CHỈNH</span>
+      </button>
+    </section>
+
+    <!-- Real-time Progress Tracking Section -->
+    <section id="progress-section" class="progress-section hidden">
+      <div class="progress-card">
+        <div class="progress-header">
+          <div class="progress-title">
+            <span class="spinner"></span>
+            <span id="progress-status-text">Đang chuẩn bị phân tích kịch bản...</span>
+          </div>
+          <span id="progress-percent" class="progress-percent">0%</span>
+        </div>
+
+        <div class="progress-bar-bg">
+          <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+
+        <!-- 2 Phân cảnh Details -->
+        <div class="scenes-preview">
+          <div class="scene-item" id="scene-card-1">
+            <div class="scene-badge">Phân cảnh 1 (0-10s)</div>
+            <p id="scene-text-1" class="scene-text">Đang phân tích kịch bản mở đầu...</p>
+          </div>
+          <div class="scene-item" id="scene-card-2">
+            <div class="scene-badge">Phân cảnh 2 (10-20s)</div>
+            <p id="scene-text-2" class="scene-text">Đang phân tích kịch bản kết thúc...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Video Showcase (Sau khi render xong) -->
+    <section id="result-section" class="result-section hidden">
+      <div class="result-card">
+        <div class="result-header">
+          <div class="result-badge">🎉 ĐÃ HOÀN TẤT & LƯU TRÊN SERVER</div>
+          <h2 id="result-prompt-title" class="result-title">...</h2>
+        </div>
+
+        <div class="video-player-container">
+          <video id="main-video-player" controls autoplay loop playsinline>
+            Trình duyệt của bạn không hỗ trợ phát thẻ video.
+          </video>
+        </div>
+
+        <div class="result-actions">
+          <a id="btn-download-video" class="btn-action download" href="#" download>
+            <span>⬇️ Tải Video 20s Về Máy</span>
+          </a>
+          <button id="btn-copy-link" class="btn-action copy">
+            <span>🔗 Sao Chép Đường Dẫn Server</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- My Gallery / Lịch sử video -->
+    <section class="gallery-section">
+      <div class="gallery-header">
+        <h2 class="gallery-title">📁 Bộ Sưu Tập Video Đã Tạo Trên Server</h2>
+        <button id="btn-refresh-gallery" class="btn-refresh" title="Làm mới">🔄 Làm mới</button>
+      </div>
+
+      <div id="gallery-grid" class="gallery-grid">
+        <!-- Render động qua JavaScript -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Auth Modal (Đăng nhập / Đăng ký) -->
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-tabs">
+          <button id="tab-login" class="tab-btn active">Đăng Nhập</button>
+          <button id="tab-register" class="tab-btn">Đăng Ký</button>
+        </div>
+        <button id="btn-close-modal" class="btn-close">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Form Đăng nhập -->
+        <form id="form-login" class="auth-form">
+          <div class="form-group">
+            <label>Email:</label>
+            <input type="email" id="login-email" placeholder="demo@gemini.ai" required>
+          </div>
+          <div class="form-group">
+            <label>Mật khẩu:</label>
+            <input type="password" id="login-password" placeholder="••••••" required>
+          </div>
+          <button type="submit" class="btn-submit">Đăng Nhập</button>
+
+          <div class="quick-demo-box">
+            <span>💡 Thử nhanh tài khoản demo có sẵn:</span>
+            <button type="button" id="btn-quick-demo" class="btn-quick">Dùng tài khoản Demo (1-Click)</button>
+          </div>
+        </form>
+
+        <!-- Form Đăng ký -->
+        <form id="form-register" class="auth-form hidden">
+          <div class="form-group">
+            <label>Họ và Tên:</label>
+            <input type="text" id="reg-name" placeholder="Nguyễn Văn A" required>
+          </div>
+          <div class="form-group">
+            <label>Email:</label>
+            <input type="email" id="reg-email" placeholder="ban@gmail.com" required>
+          </div>
+          <div class="form-group">
+            <label>Mật khẩu:</label>
+            <input type="password" id="reg-password" placeholder="Tối thiểu 6 ký tự" required>
+          </div>
+          <button type="submit" class="btn-submit">Tạo Tài Khoản Mới</button>
+        </form>
+
+        <div id="auth-error" class="auth-error hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>Gemini Video 20s Studio &bull; Đóng gói Docker &bull; Triển khai GitHub &bull; Tự động hóa FFmpeg</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
