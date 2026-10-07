@@ -325,32 +325,79 @@
     }
   }
 
-  // Ham cho video blob
-  async function waitForVideoBlob(timeoutMinutes = 4) {
+  // Helper lay nguon video tu the <video>
+  function getVideoUrl(v) {
+    if (!v) return '';
+    return v.currentSrc || v.src || (v.querySelector('source') ? v.querySelector('source').src : '') || '';
+  }
+
+  // Ham cho video blob voi thoi gian cho toi da 7 phut va bo dem gio truc quan
+  async function waitForVideoBlob(timeoutMinutes = 7, stepLabel = '') {
     const startTime = Date.now();
     const timeoutMs = timeoutMinutes * 60 * 1000;
-    const initialVideos = Array.from(document.querySelectorAll('video'));
+    
+    // Ghi nhan tat ca cac nguon video dang ton tai truoc khi prompt
+    const initialSources = new Set(
+      Array.from(document.querySelectorAll('video'))
+        .map(getVideoUrl)
+        .filter(Boolean)
+    );
+
+    console.log(`[Gemini Ultra 20s] Bat dau cho video moi (Timeout: ${timeoutMinutes} phut)...`);
 
     while (Date.now() - startTime < timeoutMs) {
       await new Promise(r => setTimeout(r, 3000));
 
-      const currentVideos = Array.from(document.querySelectorAll('video'));
-      const newVideo = currentVideos.find(v => !initialVideos.includes(v) && v.src);
+      const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+      const m = Math.floor(elapsedSec / 60);
+      const s = elapsedSec % 60;
+      const timeStr = `${m}m ${s < 10 ? '0' : ''}${s}s`;
 
-      if (newVideo && newVideo.src) {
-        try {
-          const res = await fetch(newVideo.src);
-          const blob = await res.blob();
-          if (blob && blob.size > 10000) {
-            return blob;
+      if (stepLabel) {
+        setStatus(`${stepLabel}\n⏳ Đang đợi Gemini Ultra hoàn tất kết xuất: ${timeStr} / tối đa ${timeoutMinutes} phút...`);
+      }
+
+      // 1. Quet qua tat ca the <video> tren trang
+      const currentVideos = Array.from(document.querySelectorAll('video'));
+      for (const v of currentVideos) {
+        const src = getVideoUrl(v);
+        if (src && !initialSources.has(src)) {
+          console.log('[Gemini Ultra 20s] Tim thay video moi:', src);
+          try {
+            const res = await fetch(src);
+            const blob = await res.blob();
+            if (blob && blob.size > 10000) {
+              console.log(`[Gemini Ultra 20s] Da tai thanh cong blob (${Math.round(blob.size / 1024)} KB)`);
+              return blob;
+            }
+          } catch (e) {
+            console.warn('Loi fetch blob tu video src:', e);
           }
-        } catch (e) {
-          console.warn('Lỗi fetch blob:', e);
+        }
+      }
+
+      // 2. Quet qua cac the link download video hoac nut Tai xuong
+      const downloadElements = Array.from(document.querySelectorAll('a[download], a[href*=".mp4"], a[href*="googlevideo"], a[href*="video"]'));
+      for (const el of downloadElements) {
+        const link = el.href;
+        if (link && !initialSources.has(link)) {
+          console.log('[Gemini Ultra 20s] Tim thay link tai video:', link);
+          try {
+            const res = await fetch(link);
+            const blob = await res.blob();
+            if (blob && blob.size > 10000) {
+              return blob;
+            }
+          } catch (e) {}
         }
       }
     }
-    throw new Error('Hết thời gian chờ video từ Gemini Ultra!');
+    throw new Error(`Hết thời gian chờ video từ Gemini Ultra (đã đợi hơn ${timeoutMinutes} phút)!`);
   }
+
+  // Luu tru canh 1 de phong truong hop canh 2 bi gian doan
+  let cachedClip1Blob = null;
+  let cachedPrompt = '';
 
   // Xu ly bat dau
   async function handleStartCreation() {
@@ -364,6 +411,7 @@
       return;
     }
 
+    cachedPrompt = rawPrompt;
     const startBtn = document.getElementById('gu-start-btn');
     if (startBtn) {
       startBtn.disabled = true;
@@ -376,27 +424,50 @@
       const p1 = `Tạo video 10s: Cảnh 1 mở đầu, ${rawPrompt}, góc quay toàn cảnh điện ảnh sắc nét 4K 60fps, camera tracking mượt mà.`;
       const p2 = `Tạo video 10s: Cảnh 2 tiếp nối liền mạch cảnh 1 của ${rawPrompt}, cao trào diễn tiến hành động, ánh sáng điện ảnh rực rỡ, camera lùi xa.`;
 
-      // Cảnh 1
-      setStatus(`⏳ [Bước 1/3] Đang yêu cầu Gemini Ultra tạo Cảnh 1 (10s)...`);
-      await submitPromptToGemini(p1);
+      // Cảnh 1 (Chi tao neu chua co clip1 cached)
+      if (!cachedClip1Blob) {
+        setStatus(`⏳ [Bước 1/3] Đang gửi yêu cầu tạo Cảnh 1 (10s) lên Gemini Ultra...`);
+        await submitPromptToGemini(p1);
 
-      setStatus(`⏳ [Bước 1/3] Đang chờ Cảnh 1 render xong (khoảng 1-2 phút)...`);
-      const clip1Blob = await waitForVideoBlob(4);
-      setStatus(`✅ Đã nhận được Cảnh 1 (10s)! Đang chuẩn bị tạo Cảnh 2...`, '#34d399');
-
-      await new Promise(r => setTimeout(r, 4000));
+        cachedClip1Blob = await waitForVideoBlob(7, `⏳ [Bước 1/3] Đang xử lý Cảnh 1 (10s)`);
+        setStatus(`✅ Đã nhận được Cảnh 1 (10s)! Đang chuẩn bị tạo Cảnh 2...`, '#34d399');
+        await new Promise(r => setTimeout(r, 4000));
+      } else {
+        setStatus(`✅ Sử dụng Cảnh 1 đã có sẵn trong bộ nhớ! Đang tạo Cảnh 2...`, '#34d399');
+      }
 
       // Cảnh 2
-      setStatus(`⏳ [Bước 2/3] Đang yêu cầu Gemini Ultra tạo Cảnh 2 (10s)...`);
+      setStatus(`⏳ [Bước 2/3] Đang gửi yêu cầu tạo Cảnh 2 (10s) lên Gemini Ultra...`);
       await submitPromptToGemini(p2);
 
-      setStatus(`⏳ [Bước 2/3] Đang chờ Cảnh 2 render xong...`);
-      const clip2Blob = await waitForVideoBlob(4);
-      setStatus(`✅ Đã nhận được Cảnh 2 (10s)! Đang tiến hành ghép...`, '#34d399');
+      let clip2Blob = null;
+      try {
+        clip2Blob = await waitForVideoBlob(7, `⏳ [Bước 2/3] Đang xử lý Cảnh 2 (10s)`);
+        setStatus(`✅ Đã nhận được Cảnh 2 (10s)! Đang tiến hành ghép...`, '#34d399');
+      } catch (errC2) {
+        console.warn('Lỗi cảnh 2:', errC2.message);
+        // Phuong an cuu canh: Neu canh 2 loi nhung canh 1 da co
+        setStatus(`⚠️ Cảnh 2 bị quá thời gian, nhưng Cảnh 1 (10s) đã sẵn sàng! Đang đẩy Cảnh 1 hoàn chỉnh lên server...`, '#fbbf24');
+        
+        // Day duy nhat canh 1 len server de nguoi dung khong bi mat trang
+        const formSingle = new FormData();
+        formSingle.append('video', cachedClip1Blob, 'video_10s.mp4');
+        formSingle.append('prompt', rawPrompt + ' (Bản 10s Cảnh 1)');
+        formSingle.append('email', email);
 
-      // Ghép video
+        await fetch(`${SERVER_URL}/api/videos/upload-finished`, {
+          method: 'POST',
+          body: formSingle
+        });
+
+        setStatus(`🎉 ĐÃ BẢO LƯU THÀNH CÔNG CẢNH 1 (10s) LÊN SERVER! Bạn có thể xem trên web hoặc bấm nút để tạo lại riêng Cảnh 2 nối vào.`, '#34d399', SERVER_URL);
+        cachedClip1Blob = null;
+        return;
+      }
+
+      // Ghép video 20s
       const formData = new FormData();
-      formData.append('clip1', clip1Blob, 'clip1.mp4');
+      formData.append('clip1', cachedClip1Blob, 'clip1.mp4');
       formData.append('clip2', clip2Blob, 'clip2.mp4');
       formData.append('prompt', rawPrompt);
       formData.append('email', email);
@@ -421,6 +492,7 @@
         throw new Error(uploadData.message || 'Lỗi xử lý ghép video.');
       }
 
+      cachedClip1Blob = null; // Reset cache khi da hoan thanh 20s
       const cleanNote = isLocalBridgeOnline ? ' (Đã dọn dẹp sạch ổ cứng máy tính!)' : '';
       setStatus(`🎉 THÀNH CÔNG RỰC RỠ! Video 20s hoàn chỉnh đã có mặt trên server!${cleanNote}`, '#34d399', SERVER_URL);
 
