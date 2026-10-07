@@ -37,7 +37,12 @@ app.get('/api/auth/google-client-id', (req, res) => {
 app.get('/api/auth/me', auth, authController.me);
 
 // 2. Videos
+const multer = require('multer');
+const upload = multer({ dest: config.TEMP_DIR });
+
 app.post('/api/videos', auth, videoController.createVideo);
+app.post('/api/videos/upload-and-stitch', upload.fields([{ name: 'clip1', maxCount: 1 }, { name: 'clip2', maxCount: 1 }]), videoController.uploadAndStitch);
+app.post('/api/videos/upload-finished', upload.single('video'), videoController.uploadFinishedVideo);
 app.get('/api/videos/status/:id', auth, videoController.getVideoStatus);
 app.get('/api/videos/my', auth, videoController.listMyVideos);
 app.delete('/api/videos/:id', auth, videoController.deleteVideo);
