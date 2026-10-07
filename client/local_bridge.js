@@ -152,6 +152,16 @@ async function uploadToServerAndCleanup({ outputPath, tempFiles, prompt, email }
 
 // Khởi tạo Express Server cho Local Bridge
 const app = express();
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', '*');
+  res.header('Access-Control-Allow-Private-Network', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 

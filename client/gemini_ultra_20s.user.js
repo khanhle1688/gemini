@@ -1,17 +1,19 @@
 // ==UserScript==
 // @name         Gemini Ultra 20s Auto Creator & Server Bridge
 // @namespace    https://gem.nexiq.win/
-// @version      2.3
-// @description  Tự động tạo 2 clip 10s trên Gemini Ultra, ghép 20s tại máy bằng FFmpeg, đẩy lên server và tự động xóa sạch file rác (Chuẩn TrustedTypes cho Google)
+// @version      2.6
+// @description  Tự động tạo 2 clip 10s trên Gemini Ultra, Cảnh 2 thử lại 3 lần (tối đa 10 phút), ghép 20s tại máy và xóa sạch file rác (Bảo vệ GM_xmlhttpRequest chống Failed to Fetch)
 // @author       Gemini Ultra Studio
 // @match        *://gemini.google.com/*
 // @include      *://gemini.google.com/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
 // @grant        GM_notification
 // @connect      gem.nexiq.win
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      *
 // ==/UserScript==
 
 (function() {
@@ -21,7 +23,7 @@
   const LOCAL_BRIDGE_URL = 'http://127.0.0.1:4567';
   let isLocalBridgeOnline = false;
 
-  console.log('[Gemini Ultra 20s] Script khoi chay tren gemini.google.com...');
+  console.log('[Gemini Ultra 20s v2.6] Script khoi chay tren gemini.google.com...');
 
   // Helper tao DOM an toan 100% (Khong dung innerHTML de tranh bi chan boi Google TrustedTypes)
   function createEl(tag, styles = {}, text = '', attrs = {}) {
@@ -38,6 +40,91 @@
       }
     }
     return el;
+  }
+
+  // BỘ GIAO TIẾP MẠNG AN TOÀN TUYỆT ĐỐI (DÙNG GM_xmlhttpRequest ĐỂ VƯỢT CSP VÀ MIXED CONTENT HTTPS->HTTP)
+  function sendPostRequest(url, formData) {
+    return new Promise((resolve, reject) => {
+      const gmReq = (typeof GM_xmlhttpRequest !== 'undefined') ? GM_xmlhttpRequest :
+                    (typeof GM !== 'undefined' && GM.xmlHttpRequest) ? GM.xmlHttpRequest : null;
+
+      if (gmReq) {
+        console.log('[Gemini Ultra 20s] Gui du lieu qua GM_xmlhttpRequest toi:', url);
+        gmReq({
+          method: 'POST',
+          url: url,
+          data: formData,
+          timeout: 300000,
+          onload: function(res) {
+            try {
+              const data = JSON.parse(res.responseText);
+              if (res.status >= 200 && res.status < 300 && data.success) {
+                resolve(data);
+              } else {
+                reject(new Error(data.message || `Lỗi máy chủ (${res.status}): ${res.responseText.slice(0, 100)}`));
+              }
+            } catch (e) {
+              if (res.status >= 200 && res.status < 300) {
+                resolve({ success: true, text: res.responseText });
+              } else {
+                reject(new Error(`Máy chủ phản hồi mã ${res.status}: ${res.responseText.slice(0, 100)}`));
+              }
+            }
+          },
+          onerror: function(err) {
+            reject(new Error('Lỗi kết nối GM_xmlhttpRequest: ' + (err.error || err.statusText || 'Không thể kết nối')));
+          },
+          ontimeout: function() {
+            reject(new Error('Hết thời gian chờ phản hồi từ máy chủ (timeout 5 phút)'));
+          }
+        });
+      } else {
+        // Fallback fetch thông thường
+        fetch(url, { method: 'POST', body: formData })
+          .then(async (r) => {
+            const data = await r.json();
+            if (!data.success) throw new Error(data.message || `Lỗi từ server (${r.status})`);
+            return data;
+          })
+          .then(resolve)
+          .catch(reject);
+      }
+    });
+  }
+
+  // Tải file video Blob qua GM_xmlhttpRequest (không bị CORS)
+  function fetchVideoBlob(url) {
+    return new Promise((resolve, reject) => {
+      const gmReq = (typeof GM_xmlhttpRequest !== 'undefined') ? GM_xmlhttpRequest :
+                    (typeof GM !== 'undefined' && GM.xmlHttpRequest) ? GM.xmlHttpRequest : null;
+
+      if (gmReq) {
+        gmReq({
+          method: 'GET',
+          url: url,
+          responseType: 'blob',
+          timeout: 60000,
+          onload: function(res) {
+            if (res.response && res.response.size > 10000) {
+              resolve(res.response);
+            } else {
+              reject(new Error('Blob tải về quá nhỏ hoặc không hợp lệ'));
+            }
+          },
+          onerror: function(err) {
+            reject(new Error('Lỗi tải video blob: ' + (err.error || 'Network error')));
+          }
+        });
+      } else {
+        fetch(url)
+          .then(r => r.blob())
+          .then(blob => {
+            if (blob && blob.size > 10000) resolve(blob);
+            else reject(new Error('Kích thước video không hợp lệ'));
+          })
+          .catch(reject);
+      }
+    });
   }
 
   function setupUI() {
@@ -135,7 +222,7 @@
       'color': '#aaa',
       'margin-bottom': '16px',
       'line-height': '1.5'
-    }, 'Tự động dùng gói Gemini Ultra tạo 2 cảnh (mỗi cảnh 10s), ghép thành video 20s mượt mà và lưu lên gem.nexiq.win!');
+    }, 'Tự động tạo 2 cảnh (mỗi cảnh 10s). Nếu Cảnh 2 lỗi sẽ tự động thử lại 3 lần. Chỉ lưu khi ra video 20s hoàn thiện!');
     modalBox.appendChild(desc);
 
     // Label 1
@@ -216,7 +303,8 @@
       'margin-bottom': '16px',
       'font-size': '13px',
       'color': '#cbd5e1',
-      'line-height': '1.4'
+      'line-height': '1.4',
+      'white-space': 'pre-line'
     });
     statusBox.id = 'gu-status-box';
     const statusText = createEl('div', {}, 'Đang chuẩn bị...');
@@ -253,20 +341,48 @@
     console.log('[Gemini Ultra 20s] Da them nut noi vao document.body thanh cong!');
   }
 
-  async function checkLocalBridge() {
+  function checkLocalBridge() {
     const modeText = document.getElementById('gu-mode-text');
     if (!modeText) return;
-    try {
-      const res = await fetch(`${LOCAL_BRIDGE_URL}/health`, { signal: AbortSignal.timeout(1500) });
-      const data = await res.json();
-      if (data && data.status === 'online') {
-        isLocalBridgeOnline = true;
-        modeText.textContent = '🖥️ Bộ ghép máy tính: SẴN SÀNG (Ghép tại máy, dọn sạch ổ cứng)';
-        return;
-      }
-    } catch (e) {
-      isLocalBridgeOnline = false;
-      modeText.textContent = '🌐 Bộ ghép máy tính: Chưa bật (Sẽ ghép trực tiếp trên Server)';
+
+    const gmReq = (typeof GM_xmlhttpRequest !== 'undefined') ? GM_xmlhttpRequest :
+                  (typeof GM !== 'undefined' && GM.xmlHttpRequest) ? GM.xmlHttpRequest : null;
+
+    if (gmReq) {
+      gmReq({
+        method: 'GET',
+        url: `${LOCAL_BRIDGE_URL}/health`,
+        timeout: 2000,
+        onload: function(res) {
+          try {
+            const data = JSON.parse(res.responseText);
+            if (data && data.status === 'online') {
+              isLocalBridgeOnline = true;
+              modeText.textContent = '🖥️ Bộ ghép máy tính: SẴN SÀNG (Ghép tại máy, dọn sạch ổ cứng)';
+              return;
+            }
+          } catch (e) {}
+          isLocalBridgeOnline = false;
+          modeText.textContent = '🌐 Bộ ghép máy tính: Chưa kết nối (Sẽ ghép qua Server)';
+        },
+        onerror: function() {
+          isLocalBridgeOnline = false;
+          modeText.textContent = '🌐 Bộ ghép máy tính: Chưa bật (Sẽ ghép qua Server)';
+        }
+      });
+    } else {
+      fetch(`${LOCAL_BRIDGE_URL}/health`, { signal: AbortSignal.timeout(1500) })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.status === 'online') {
+            isLocalBridgeOnline = true;
+            modeText.textContent = '🖥️ Bộ ghép máy tính: SẴN SÀNG (Ghép tại máy, dọn sạch ổ cứng)';
+          }
+        })
+        .catch(() => {
+          isLocalBridgeOnline = false;
+          modeText.textContent = '🌐 Bộ ghép máy tính: Chưa bật (Sẽ ghép qua Server)';
+        });
     }
   }
 
@@ -331,12 +447,11 @@
     return v.currentSrc || v.src || (v.querySelector('source') ? v.querySelector('source').src : '') || '';
   }
 
-  // Ham cho video blob voi thoi gian cho toi da 7 phut va bo dem gio truc quan
-  async function waitForVideoBlob(timeoutMinutes = 7, stepLabel = '') {
+  // Ham cho video blob voi bo dem thoi gian truc quan
+  async function waitForVideoBlob(timeoutMinutes = 10, stepLabel = '') {
     const startTime = Date.now();
     const timeoutMs = timeoutMinutes * 60 * 1000;
     
-    // Ghi nhan tat ca cac nguon video dang ton tai truoc khi prompt
     const initialSources = new Set(
       Array.from(document.querySelectorAll('video'))
         .map(getVideoUrl)
@@ -354,18 +469,17 @@
       const timeStr = `${m}m ${s < 10 ? '0' : ''}${s}s`;
 
       if (stepLabel) {
-        setStatus(`${stepLabel}\n⏳ Đang đợi Gemini Ultra hoàn tất kết xuất: ${timeStr} / tối đa ${timeoutMinutes} phút...`);
+        setStatus(`${stepLabel}\n⏳ Đang đợi kết xuất: ${timeStr} / tối đa ${timeoutMinutes} phút...`);
       }
 
-      // 1. Quet qua tat ca the <video> tren trang
+      // 1. Quet qua tat ca the <video>
       const currentVideos = Array.from(document.querySelectorAll('video'));
       for (const v of currentVideos) {
         const src = getVideoUrl(v);
         if (src && !initialSources.has(src)) {
           console.log('[Gemini Ultra 20s] Tim thay video moi:', src);
           try {
-            const res = await fetch(src);
-            const blob = await res.blob();
+            const blob = await fetchVideoBlob(src);
             if (blob && blob.size > 10000) {
               console.log(`[Gemini Ultra 20s] Da tai thanh cong blob (${Math.round(blob.size / 1024)} KB)`);
               return blob;
@@ -376,15 +490,14 @@
         }
       }
 
-      // 2. Quet qua cac the link download video hoac nut Tai xuong
+      // 2. Quet qua cac the download video
       const downloadElements = Array.from(document.querySelectorAll('a[download], a[href*=".mp4"], a[href*="googlevideo"], a[href*="video"]'));
       for (const el of downloadElements) {
         const link = el.href;
         if (link && !initialSources.has(link)) {
           console.log('[Gemini Ultra 20s] Tim thay link tai video:', link);
           try {
-            const res = await fetch(link);
-            const blob = await res.blob();
+            const blob = await fetchVideoBlob(link);
             if (blob && blob.size > 10000) {
               return blob;
             }
@@ -395,11 +508,10 @@
     throw new Error(`Hết thời gian chờ video từ Gemini Ultra (đã đợi hơn ${timeoutMinutes} phút)!`);
   }
 
-  // Luu tru canh 1 de phong truong hop canh 2 bi gian doan
   let cachedClip1Blob = null;
   let cachedPrompt = '';
 
-  // Xu ly bat dau
+  // Xu ly bat dau tao video
   async function handleStartCreation() {
     const promptInput = document.getElementById('gu-prompt-input');
     const emailInput = document.getElementById('gu-email-input');
@@ -419,26 +531,26 @@
     }
 
     try {
-      await checkLocalBridge();
+      checkLocalBridge();
 
       const p1 = `Tạo video 10s: Cảnh 1 mở đầu, ${rawPrompt}, góc quay toàn cảnh điện ảnh sắc nét 4K 60fps, camera tracking mượt mà.`;
       const p2 = `Tạo video 10s: Cảnh 2 tiếp nối liền mạch cảnh 1 của ${rawPrompt}, cao trào diễn tiến hành động, ánh sáng điện ảnh rực rỡ, camera lùi xa.`;
 
-      // Cảnh 1 (Chi tao neu chua co clip1 cached)
+      // 1. CẢNH 1 (Tối đa 10 phút)
       if (!cachedClip1Blob) {
         setStatus(`⏳ [Bước 1/3] Đang gửi yêu cầu tạo Cảnh 1 (10s) lên Gemini Ultra...`);
         await submitPromptToGemini(p1);
 
         cachedClip1Blob = await waitForVideoBlob(10, `⏳ [Bước 1/3] Đang xử lý Cảnh 1 (10s)`);
-        setStatus(`✅ Đã nhận được Cảnh 1 (10s)! Đang chuẩn bị tạo Cảnh 2...`, '#34d399');
+        setStatus(`✅ Đã xong Cảnh 1 (10s)! Bắt đầu tạo Cảnh 2...`, '#34d399');
         await new Promise(r => setTimeout(r, 4000));
       } else {
-        setStatus(`✅ Sử dụng Cảnh 1 đã có sẵn trong bộ nhớ! Đang tạo Cảnh 2...`, '#34d399');
+        setStatus(`✅ Sử dụng Cảnh 1 đã có sẵn trong bộ nhớ! Bắt đầu tạo Cảnh 2...`, '#34d399');
       }
 
-      // Cảnh 2 (Thử tối đa 3 lần, tổng thời gian tối đa 10 phút)
+      // 2. CẢNH 2 (Thử tối đa 3 lần, tổng thời gian tối đa 10 phút)
       let clip2Blob = null;
-      const MAX_SCENE2_MS = 10 * 60 * 1000; // Tối đa 10 phút cho Cảnh 2
+      const MAX_SCENE2_MS = 10 * 60 * 1000;
       const scene2Start = Date.now();
 
       for (let attempt = 1; attempt <= 3; attempt++) {
@@ -470,44 +582,34 @@
         }
       }
 
-      // Nếu sau 3 lần (hoặc quá 10 phút) Cảnh 2 vẫn thất bại -> HỦY BỎ, KHÔNG LẤY CẢNH 1
+      // NẾU CẢNH 2 THẤT BẠI SAU 3 LẦN HOẶC QUÁ 10 PHÚT -> HỦY BỎ, KHÔNG LẤY CẢNH 1
       if (!clip2Blob) {
         cachedClip1Blob = null;
         throw new Error('Đã thử tạo Cảnh 2 tối đa 3 lần (hoặc quá 10 phút) không thành công. Đã hủy bỏ tiến trình và không lấy Cảnh 1 theo yêu cầu.');
       }
 
-      // Ghép video 20s
+      // 3. GHÉP 20S VÀ LƯU LÊN SERVER
       const formData = new FormData();
       formData.append('clip1', cachedClip1Blob, 'clip1.mp4');
       formData.append('clip2', clip2Blob, 'clip2.mp4');
       formData.append('prompt', rawPrompt);
       formData.append('email', email);
 
-      let uploadRes;
-      if (isLocalBridgeOnline) {
-        setStatus(`⚙️ [Bước 3/3] Đang chuyển vào máy tính: Ghép nối 20s bằng FFmpeg, đẩy lên server và tự động xóa sạch rác...`);
-        uploadRes = await fetch(`${LOCAL_BRIDGE_URL}/stitch-and-upload`, {
-          method: 'POST',
-          body: formData
-        });
-      } else {
-        setStatus(`🌐 [Bước 3/3] Đang gửi 2 clip lên server gem.nexiq.win để ghép mượt bằng FFmpeg...`);
-        uploadRes = await fetch(`${SERVER_URL}/api/videos/upload-and-stitch`, {
-          method: 'POST',
-          body: formData
-        });
-      }
+      let targetUrl = isLocalBridgeOnline ? `${LOCAL_BRIDGE_URL}/stitch-and-upload` : `${SERVER_URL}/api/videos/upload-and-stitch`;
+      let stepNote = isLocalBridgeOnline ?
+        `⚙️ [Bước 3/3] Đang chuyển vào máy tính: Ghép nối 20s bằng FFmpeg, đẩy lên server và tự động xóa sạch rác...` :
+        `🌐 [Bước 3/3] Đang gửi 2 clip lên server gem.nexiq.win để ghép mượt bằng FFmpeg...`;
 
-      const uploadData = await uploadRes.json();
-      if (!uploadData.success) {
-        throw new Error(uploadData.message || 'Lỗi xử lý ghép video.');
-      }
+      setStatus(stepNote);
+      
+      const uploadData = await sendPostRequest(targetUrl, formData);
 
-      cachedClip1Blob = null; // Reset cache khi da hoan thanh 20s
+      cachedClip1Blob = null; // Hoàn tất thành công -> xóa bộ nhớ
       const cleanNote = isLocalBridgeOnline ? ' (Đã dọn dẹp sạch ổ cứng máy tính!)' : '';
       setStatus(`🎉 THÀNH CÔNG RỰC RỠ! Video 20s hoàn chỉnh đã có mặt trên server!${cleanNote}`, '#34d399', SERVER_URL);
 
     } catch (err) {
+      console.error('[Gemini Ultra 20s] Lỗi tạo video:', err);
       setStatus(`❌ Lỗi: ${err.message}`, '#f87171');
     } finally {
       if (startBtn) {
@@ -517,7 +619,7 @@
     }
   }
 
-  // Tu dong chay va bam giu nut tren giao dien Gemini SPA
+  // Khởi chạy an toàn và tự bám giữ nút trên SPA
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', setupUI);
   } else {
