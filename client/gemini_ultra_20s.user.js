@@ -429,40 +429,51 @@
         setStatus(`⏳ [Bước 1/3] Đang gửi yêu cầu tạo Cảnh 1 (10s) lên Gemini Ultra...`);
         await submitPromptToGemini(p1);
 
-        cachedClip1Blob = await waitForVideoBlob(7, `⏳ [Bước 1/3] Đang xử lý Cảnh 1 (10s)`);
+        cachedClip1Blob = await waitForVideoBlob(10, `⏳ [Bước 1/3] Đang xử lý Cảnh 1 (10s)`);
         setStatus(`✅ Đã nhận được Cảnh 1 (10s)! Đang chuẩn bị tạo Cảnh 2...`, '#34d399');
         await new Promise(r => setTimeout(r, 4000));
       } else {
         setStatus(`✅ Sử dụng Cảnh 1 đã có sẵn trong bộ nhớ! Đang tạo Cảnh 2...`, '#34d399');
       }
 
-      // Cảnh 2
-      setStatus(`⏳ [Bước 2/3] Đang gửi yêu cầu tạo Cảnh 2 (10s) lên Gemini Ultra...`);
-      await submitPromptToGemini(p2);
-
+      // Cảnh 2 (Thử tối đa 3 lần, tổng thời gian tối đa 10 phút)
       let clip2Blob = null;
-      try {
-        clip2Blob = await waitForVideoBlob(7, `⏳ [Bước 2/3] Đang xử lý Cảnh 2 (10s)`);
-        setStatus(`✅ Đã nhận được Cảnh 2 (10s)! Đang tiến hành ghép...`, '#34d399');
-      } catch (errC2) {
-        console.warn('Lỗi cảnh 2:', errC2.message);
-        // Phuong an cuu canh: Neu canh 2 loi nhung canh 1 da co
-        setStatus(`⚠️ Cảnh 2 bị quá thời gian, nhưng Cảnh 1 (10s) đã sẵn sàng! Đang đẩy Cảnh 1 hoàn chỉnh lên server...`, '#fbbf24');
-        
-        // Day duy nhat canh 1 len server de nguoi dung khong bi mat trang
-        const formSingle = new FormData();
-        formSingle.append('video', cachedClip1Blob, 'video_10s.mp4');
-        formSingle.append('prompt', rawPrompt + ' (Bản 10s Cảnh 1)');
-        formSingle.append('email', email);
+      const MAX_SCENE2_MS = 10 * 60 * 1000; // Tối đa 10 phút cho Cảnh 2
+      const scene2Start = Date.now();
 
-        await fetch(`${SERVER_URL}/api/videos/upload-finished`, {
-          method: 'POST',
-          body: formSingle
-        });
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const elapsedScene2 = Date.now() - scene2Start;
+        if (elapsedScene2 >= MAX_SCENE2_MS) {
+          console.warn('[Gemini Ultra 20s] Đã vượt quá 10 phút chờ Cảnh 2!');
+          break;
+        }
 
-        setStatus(`🎉 ĐÃ BẢO LƯU THÀNH CÔNG CẢNH 1 (10s) LÊN SERVER! Bạn có thể xem trên web hoặc bấm nút để tạo lại riêng Cảnh 2 nối vào.`, '#34d399', SERVER_URL);
+        const remainingMs = MAX_SCENE2_MS - elapsedScene2;
+        const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+
+        try {
+          const attemptText = attempt === 1 ? 'Đang tạo Cảnh 2 (10s)...' : `Đang thử lại Cảnh 2 (Lần ${attempt}/3)...`;
+          setStatus(`⏳ [Bước 2/3] ${attemptText}`);
+          await submitPromptToGemini(p2);
+
+          clip2Blob = await waitForVideoBlob(remainingMinutes, `⏳ [Bước 2/3] Cảnh 2 (Lần ${attempt}/3)`);
+          if (clip2Blob) {
+            setStatus(`✅ Đã tạo thành công Cảnh 2 (10s) ở lần thử thứ ${attempt}! Đang tiến hành ghép 20s...`, '#34d399');
+            break;
+          }
+        } catch (errAttempt) {
+          console.warn(`[Gemini Ultra 20s] Lần thử ${attempt} của Cảnh 2 không thành công:`, errAttempt.message);
+          if (attempt < 3 && (Date.now() - scene2Start < MAX_SCENE2_MS)) {
+            setStatus(`⚠️ Cảnh 2 lần ${attempt} không thành công. Đang tự động gửi tạo lại lần ${attempt + 1}/3...`, '#fbbf24');
+            await new Promise(r => setTimeout(r, 4000));
+          }
+        }
+      }
+
+      // Nếu sau 3 lần (hoặc quá 10 phút) Cảnh 2 vẫn thất bại -> HỦY BỎ, KHÔNG LẤY CẢNH 1
+      if (!clip2Blob) {
         cachedClip1Blob = null;
-        return;
+        throw new Error('Đã thử tạo Cảnh 2 tối đa 3 lần (hoặc quá 10 phút) không thành công. Đã hủy bỏ tiến trình và không lấy Cảnh 1 theo yêu cầu.');
       }
 
       // Ghép video 20s
