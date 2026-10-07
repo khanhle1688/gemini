@@ -86,6 +86,64 @@ exports.login = async (req, res) => {
   }
 };
 
+exports.googleLogin = async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ success: false, message: 'Thiếu mã xác thực Google Credential.' });
+    }
+
+    // Xác thực token với máy chủ Google
+    const googleVerifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`;
+    const response = await fetch(googleVerifyUrl);
+    const payload = await response.json();
+
+    if (!payload || payload.error || !payload.email) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token Google không hợp lệ hoặc đã hết hạn: ' + (payload.error_description || payload.error || '')
+      });
+    }
+
+    const { email, name, picture, sub: googleId } = payload;
+
+    // Tìm hoặc tạo người dùng trong database
+    let user = db.findUserByEmail(email);
+    if (!user) {
+      user = db.createUser({
+        id: uuidv4(),
+        name: name || email.split('@')[0],
+        email: email.toLowerCase(),
+        avatar: picture || '',
+        googleId,
+        authProvider: 'google',
+        createdAt: new Date().toISOString(),
+      });
+      console.log(`[+] Đã tạo tài khoản Google mới: ${email}`);
+    } else {
+      // Cập nhật thông tin avatar hoặc googleId nếu có thay đổi
+      db.updateUser ? db.updateUser(user.id, { avatar: picture, googleId }) : (user.avatar = picture);
+    }
+
+    const token = jwt.sign({ id: user.id }, config.JWT_SECRET, { expiresIn: '14d' });
+
+    res.json({
+      success: true,
+      message: 'Đăng nhập bằng Google thành công!',
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar || picture
+      }
+    });
+  } catch (err) {
+    console.error('Lỗi Google Auth:', err);
+    res.status(500).json({ success: false, message: 'Lỗi xác thực Google: ' + err.message });
+  }
+};
+
 exports.me = (req, res) => {
   res.json({ success: true, user: req.user });
 };

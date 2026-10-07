@@ -76,9 +76,13 @@ async function checkCurrentUser() {
 
 function renderAuthNav() {
   if (currentUser) {
+    const avatarHtml = currentUser.avatar 
+      ? `<img src="${currentUser.avatar}" alt="${currentUser.name}" style="width: 34px; height: 34px; border-radius: 50%; object-fit: cover; border: 2px solid #6366f1;">`
+      : `<div class="user-avatar">${currentUser.name.charAt(0).toUpperCase()}</div>`;
+
     authSection.innerHTML = `
       <div class="user-profile">
-        <div class="user-avatar">${currentUser.name.charAt(0).toUpperCase()}</div>
+        ${avatarHtml}
         <div>
           <div style="font-size: 0.85rem; font-weight: 700;">${currentUser.name}</div>
           <button class="btn-logout" id="btn-logout">Đăng xuất</button>
@@ -91,6 +95,32 @@ function renderAuthNav() {
       <button class="btn-nav-auth" id="btn-open-login">Đăng Nhập / Đăng Ký</button>
     `;
     document.getElementById('btn-open-login').addEventListener('click', () => openAuthModal('login'));
+  }
+}
+
+// Xử lý phản hồi đăng nhập từ Google (Google Identity Services)
+async function handleGoogleCredentialResponse(response) {
+  if (!response || !response.credential) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: response.credential })
+    });
+
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message);
+
+    currentToken = data.token;
+    currentUser = data.user;
+    localStorage.setItem('gv20s_token', currentToken);
+    closeAuthModal();
+    renderAuthNav();
+    loadGallery();
+  } catch (err) {
+    authError.textContent = 'Lỗi Google Sign-In: ' + err.message;
+    authError.classList.remove('hidden');
   }
 }
 
@@ -128,6 +158,9 @@ function logout() {
 
 // --- Event Listeners Setup ---
 function setupEventListeners() {
+  // Khởi tạo Google Identity Services
+  initGoogleAuth();
+
   // Modal tabs
   tabLogin.addEventListener('click', () => switchAuthTab('login'));
   tabRegister.addEventListener('click', () => switchAuthTab('register'));
@@ -459,3 +492,47 @@ window.deleteVideoItem = async function(id) {
     alert('Lỗi: ' + err.message);
   }
 };
+
+// Khởi tạo Google Identity Services
+async function initGoogleAuth() {
+  const btnGoogle = document.getElementById('btn-google-login');
+  const googleContainer = document.getElementById('google-btn-container');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/google-client-id`);
+    const data = await res.json();
+    const clientId = data.clientId;
+
+    if (clientId && window.google && window.google.accounts) {
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleGoogleCredentialResponse,
+        auto_select: false,
+      });
+
+      // Render nút chính thức của Google
+      googleContainer.innerHTML = '';
+      google.accounts.id.renderButton(googleContainer, {
+        theme: 'outline',
+        size: 'large',
+        type: 'standard',
+        shape: 'rectangular',
+        text: 'signin_with',
+        logo_alignment: 'left',
+        width: 320
+      });
+    } else if (btnGoogle) {
+      // Khi chưa cấu hình GOOGLE_CLIENT_ID trong .env
+      btnGoogle.addEventListener('click', () => {
+        if (!clientId) {
+          alert('Để bật Google Sign-in: Bạn chỉ cần thêm GOOGLE_CLIENT_ID vào file .env trên server (tạo miễn phí tại console.cloud.google.com). Trong lúc này bạn có thể dùng tài khoản demo hoặc đăng ký trực tiếp.');
+        } else if (window.google && window.google.accounts) {
+          google.accounts.id.prompt();
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Google Auth Init:', err);
+  }
+}
+

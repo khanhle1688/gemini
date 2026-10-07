@@ -29,6 +29,10 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 // 1. Authentication
 app.post('/api/auth/register', authController.register);
 app.post('/api/auth/login', authController.login);
+app.post('/api/auth/google', authController.googleLogin);
+app.get('/api/auth/google-client-id', (req, res) => {
+  res.json({ clientId: process.env.GOOGLE_CLIENT_ID || '' });
+});
 app.get('/api/auth/me', auth, authController.me);
 
 // 2. Videos
