@@ -158,7 +158,44 @@ function logout() {
 
 // --- Event Listeners Setup ---
 function setupEventListeners() {
-  // Khởi tạo Google Identity Services
+  // 1-Click Gmail Quick Login Form
+  const formQuickGmail = document.getElementById('form-quick-gmail');
+  if (formQuickGmail) {
+    formQuickGmail.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('quick-gmail-input').value.trim();
+      if (!email) return;
+
+      const btn = document.getElementById('btn-quick-gmail-submit');
+      btn.disabled = true;
+      btn.textContent = 'Đang vào...';
+
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/quick-google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message);
+
+        currentToken = data.token;
+        currentUser = data.user;
+        localStorage.setItem('gv20s_token', currentToken);
+        closeAuthModal();
+        renderAuthNav();
+        loadGallery();
+      } catch (err) {
+        authError.textContent = err.message;
+        authError.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Vào Studio 🚀';
+      }
+    });
+  }
+
+  // Khởi tạo Google Identity Services (Nếu có Client ID)
   initGoogleAuth();
 
   // Modal tabs

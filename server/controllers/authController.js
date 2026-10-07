@@ -127,20 +127,47 @@ exports.googleLogin = async (req, res) => {
 
     const token = jwt.sign({ id: user.id }, config.JWT_SECRET, { expiresIn: '14d' });
 
+// Đăng nhập nhanh 1-Chạm bằng Gmail (Không cần Google Cloud Console)
+exports.quickGoogleLogin = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập đúng định dạng địa chỉ Gmail.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const name = cleanEmail.split('@')[0];
+    // Avatar phong cách Google Material Design
+    const avatarUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(cleanEmail)}`;
+
+    let user = db.findUserByEmail(cleanEmail);
+    if (!user) {
+      user = db.createUser({
+        id: uuidv4(),
+        name: name,
+        email: cleanEmail,
+        avatar: avatarUrl,
+        authProvider: 'gmail-quick',
+        createdAt: new Date().toISOString(),
+      });
+      console.log(`[+] Đã tạo tài khoản Gmail 1-Click: ${cleanEmail}`);
+    }
+
+    const token = jwt.sign({ id: user.id }, config.JWT_SECRET, { expiresIn: '30d' });
+
     res.json({
       success: true,
-      message: 'Đăng nhập bằng Google thành công!',
+      message: 'Đăng nhập Gmail thành công!',
       token,
       user: {
         id: user.id,
         name: user.name,
         email: user.email,
-        avatar: user.avatar || picture
+        avatar: user.avatar || avatarUrl
       }
     });
   } catch (err) {
-    console.error('Lỗi Google Auth:', err);
-    res.status(500).json({ success: false, message: 'Lỗi xác thực Google: ' + err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

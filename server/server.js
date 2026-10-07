@@ -30,6 +30,7 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 app.post('/api/auth/register', authController.register);
 app.post('/api/auth/login', authController.login);
 app.post('/api/auth/google', authController.googleLogin);
+app.post('/api/auth/quick-google', authController.quickGoogleLogin);
 app.get('/api/auth/google-client-id', (req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || '' });
 });
